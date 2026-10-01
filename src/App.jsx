@@ -1,13 +1,63 @@
 import { useEffect, useState } from 'react';
 import './App.css';
 import api from './services/api';
+import { createOrder } from './services/orderService';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import sweetImage from './assets/images/pexels-vi-t-anh-nguy-n-2150409023-39240989.jpg';
+import { useCart } from './context/CartContext.jsx';
+import { useMemo } from 'react';
+const SPARKLE_COUNT = 30;
 
+const Sparkles = () => {
+  const sparkles = useMemo(
+    () =>
+      Array.from({ length: SPARKLE_COUNT }, (_, i) => ({
+        id: i,
+        x: Math.random() * 100,
+        size: 6 + Math.random() * 12,
+        delay: -Math.random() * 12,
+        duration: 8 + Math.random() * 8,
+        drift: (Math.random() - 0.5) * 120,
+        twinkle: 1.2 + Math.random() * 1.6,
+        dot: false,
+      })),
+    []
+  );
+
+  return (
+    <div className="sugar-sprinkles" aria-hidden="true">
+      {sparkles.map((s) => (
+        <span
+          key={s.id}
+          className={`sparkle ${s.dot ? 'dot' : ''}`}
+          style={{
+            '--x': `${s.x}%`,
+            '--size': `${s.size}px`,
+            '--delay': `${s.delay}s`,
+            '--duration': `${s.duration}s`,
+            '--drift': `${s.drift}px`,
+            '--twinkle': `${s.twinkle}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+};
 const App = () => {
   const { user, isAuthenticated, logout } = useAuth();
+
+  const {
+    cartItems,
+    cartCount,
+    cartTotal,
+    addToCart,
+    removeFromCart,
+    increaseQuantity,
+    decreaseQuantity,
+    clearCart,
+  } = useCart();
 
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
@@ -19,6 +69,11 @@ const App = () => {
   const [authPage, setAuthPage] = useState(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
+
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderMessage, setOrderMessage] = useState('');
+  const [orderError, setOrderError] = useState('');
 
   const [darkMode, setDarkMode] = useState(() => {
     return localStorage.getItem('sweet-house-theme') === 'dark';
@@ -67,6 +122,7 @@ const App = () => {
     try {
       await logout();
       setMenuOpen(false);
+      setCartOpen(false);
     } catch (error) {
       console.error('Logout failed:', error);
     }
@@ -85,9 +141,35 @@ const App = () => {
     });
   };
 
+  // عند الضغط على Products في الناف بار: تصفير الفلتر + عرض كل المنتجات
+  const handleProductsNavClick = () => {
+    setSelectedCategory(null);
+    setMenuOpen(false);
+
+    setTimeout(() => {
+      document.getElementById('products')?.scrollIntoView({
+        behavior: 'smooth',
+      });
+    }, 50);
+  };
+
+  // عند الضغط على Home: تصفير الفلتر أيضاً
+  const handleHomeNavClick = () => {
+    setSelectedCategory(null);
+    setMenuOpen(false);
+
+    setTimeout(() => {
+      document.getElementById('home')?.scrollIntoView({
+        behavior: 'smooth',
+      });
+    }, 50);
+  };
+
   const handleCategoryClick = (categoryId) => {
     setSelectedCategory(
-      selectedCategory === categoryId ? null : categoryId
+      Number(selectedCategory) === Number(categoryId)
+        ? null
+        : categoryId
     );
 
     setTimeout(() => {
@@ -97,26 +179,120 @@ const App = () => {
     }, 50);
   };
 
-  const filteredProducts = selectedCategory
-    ? products.filter(
-        (product) => product.category_id === selectedCategory
-      )
-    : products;
+  const handleAddToCart = (product) => {
+    addToCart(product);
 
-  const getCategoryName = (categoryId) => {
-    const category = categories.find(
-      (item) => item.id === categoryId
-    );
-
-    return category?.name || 'Sweet House';
+    setOrderMessage('');
+    setOrderError('');
   };
+
+  const handleOpenCart = () => {
+    setMenuOpen(false);
+    setOrderMessage('');
+    setOrderError('');
+    setCartOpen(true);
+  };
+
+  const handleCloseCart = () => {
+    setCartOpen(false);
+  };
+
+  const handlePlaceOrder = async () => {
+    setOrderMessage('');
+    setOrderError('');
+
+    if (!isAuthenticated) {
+      setCartOpen(false);
+      setAuthPage('login');
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      setOrderError('Your cart is empty.');
+      return;
+    }
+
+    setOrderLoading(true);
+
+    try {
+      const items = cartItems.map((item) => ({
+        product_id: item.id,
+        quantity: item.quantity,
+      }));
+
+      const response = await createOrder(items);
+
+      setOrderMessage(
+        response.message || 'Order created successfully.'
+      );
+
+      setProducts((currentProducts) =>
+        currentProducts.map((product) => {
+          const orderedItem = cartItems.find(
+            (item) => item.id === product.id
+          );
+
+          if (!orderedItem) {
+            return product;
+          }
+
+          return {
+            ...product,
+            stock: Math.max(
+              0,
+              Number(product.stock) - orderedItem.quantity
+            ),
+          };
+        })
+      );
+
+      clearCart();
+    } catch (error) {
+      console.error('Order creation failed:', error);
+
+      const backendMessage =
+        error.response?.data?.message;
+
+      const validationErrors =
+        error.response?.data?.errors;
+
+      if (validationErrors?.items?.length) {
+        setOrderError(validationErrors.items[0]);
+      } else {
+        setOrderError(
+          backendMessage ||
+            'Failed to place the order. Please try again.'
+        );
+      }
+    } finally {
+      setOrderLoading(false);
+    }
+  };
+
+const getProductCategoryId = (product) =>
+  Number(product.category_id ?? product.category?.id);
+
+const filteredProducts = selectedCategory
+  ? products.filter(
+      (product) =>
+        getProductCategoryId(product) === Number(selectedCategory)
+    )
+  : products;
+
+const getCategoryName = (categoryId) => {
+  const category = categories.find(
+    (item) => Number(item.id) === Number(categoryId)
+  );
+
+  return category?.name || 'Sweet House';
+};
 
   const getCategoryIcon = (index) => {
     const icons = [
       '🍰',
-      '🧁',
-      '🍪',
       '🍫',
+      '🍪',
+      '🧁',
       '🍓',
       '🍩',
       '🥐',
@@ -140,7 +316,7 @@ const App = () => {
 
   if (authPage) {
     return (
-      <div className="auth-wrapper">
+      <div className="auth-page-wrapper">
         <button
           className="back-home-button"
           onClick={() => setAuthPage(null)}
@@ -169,14 +345,15 @@ const App = () => {
     );
   }
 
-  return (
-    <div className="app">
-      {/* ==================== NAVBAR ==================== */}
+    return (
+    <>
+<Sparkles />
 
-      <nav className="navbar">
+  <div className="app">
+        <nav className="navbar">
         <button
           className="logo"
-          onClick={() => scrollToSection('home')}
+          onClick={handleHomeNavClick}
           type="button"
         >
           Sweet House
@@ -185,14 +362,14 @@ const App = () => {
         <div className="nav-links">
           <button
             type="button"
-            onClick={() => scrollToSection('home')}
+            onClick={handleHomeNavClick}
           >
             Home
           </button>
 
           <button
             type="button"
-            onClick={() => scrollToSection('products')}
+            onClick={handleProductsNavClick}
           >
             Products
           </button>
@@ -245,12 +422,16 @@ const App = () => {
                   <button
                     className="dropdown-item"
                     type="button"
-                    onClick={() =>
-                      scrollToSection('products')
-                    }
+                    onClick={handleOpenCart}
                   >
                     <span>🛍</span>
                     Cart
+
+                    {cartCount > 0 && (
+                      <span className="cart-count">
+                        {cartCount}
+                      </span>
+                    )}
                   </button>
 
                   {isAuthenticated ? (
@@ -309,7 +490,204 @@ const App = () => {
         </div>
       </nav>
 
-      {/* ==================== HERO ==================== */}
+      {cartOpen && (
+        <>
+          <div
+            className="cart-drawer-overlay"
+            onClick={handleCloseCart}
+          ></div>
+
+          <aside className="cart-drawer">
+            <div className="cart-drawer-header">
+              <div>
+                <span className="cart-drawer-label">
+                  YOUR ORDER
+                </span>
+
+                <h2>Your Cart</h2>
+              </div>
+
+              <button
+                className="cart-close-button"
+                type="button"
+                onClick={handleCloseCart}
+                aria-label="Close cart"
+              >
+                ×
+              </button>
+            </div>
+
+            {cartItems.length === 0 ? (
+              <div className="cart-drawer-empty">
+                <div className="cart-empty-icon">🛍</div>
+
+                <h3>Your cart is empty</h3>
+
+                <p>
+                  Add some delicious desserts and they
+                  will appear here.
+                </p>
+
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => {
+                    setCartOpen(false);
+                    scrollToSection('products');
+                  }}
+                >
+                  Explore Desserts
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="cart-drawer-items">
+                  {cartItems.map((item) => {
+                    const imageUrl = getImageUrl(
+                      item.image
+                    );
+
+                    return (
+                      <div
+                        className="cart-drawer-item"
+                        key={item.id}
+                      >
+                        <div className="cart-drawer-item-image">
+                          {imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={item.name}
+                            />
+                          ) : (
+                            <span>Sweet House</span>
+                          )}
+                        </div>
+
+                        <div className="cart-drawer-item-content">
+                          <div className="cart-drawer-item-top">
+                            <div>
+                              <span className="cart-item-category">
+                                {getCategoryName(
+                                  item.category_id
+                                )}
+                              </span>
+
+                              <h3>{item.name}</h3>
+                            </div>
+
+                            <button
+                              className="cart-remove-button"
+                              type="button"
+                              onClick={() =>
+                                removeFromCart(item.id)
+                              }
+                              aria-label={`Remove ${item.name}`}
+                            >
+                              ×
+                            </button>
+                          </div>
+
+                          <div className="cart-drawer-item-bottom">
+                            <strong>
+                              $
+                              {Number(item.price).toFixed(
+                                2
+                              )}
+                            </strong>
+
+                            <div className="cart-quantity-controls">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  decreaseQuantity(item.id)
+                                }
+                                aria-label="Decrease quantity"
+                              >
+                                −
+                              </button>
+
+                              <span>{item.quantity}</span>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  increaseQuantity(item.id)
+                                }
+                                aria-label="Increase quantity"
+                              >
+                                +
+                              </button>
+                            </div>
+
+                            <span className="cart-drawer-subtotal">
+                              $
+                              {(
+                                Number(item.price) *
+                                item.quantity
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="cart-drawer-footer">
+                  <div className="cart-drawer-summary">
+                    <div>
+                      <span>Items</span>
+                      <strong>{cartCount}</strong>
+                    </div>
+
+                    <div className="cart-drawer-total">
+                      <span>Total</span>
+                      <strong>
+                        ${cartTotal.toFixed(2)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {orderMessage && (
+                    <div className="order-success">
+                      {orderMessage}
+                    </div>
+                  )}
+
+                  {orderError && (
+                    <div className="order-error">
+                      {orderError}
+                    </div>
+                  )}
+
+                  <button
+                    className="place-order-button"
+                    type="button"
+                    onClick={handlePlaceOrder}
+                    disabled={orderLoading}
+                  >
+                    {orderLoading
+                      ? 'Placing Order...'
+                      : 'Place Order'}
+                  </button>
+
+                  <button
+                    className="clear-cart-button"
+                    type="button"
+                    onClick={() => {
+                      clearCart();
+                      setOrderMessage('');
+                      setOrderError('');
+                    }}
+                  >
+                    Clear Cart
+                  </button>
+                </div>
+              </>
+            )}
+          </aside>
+        </>
+      )}
 
       <section className="hero" id="home">
         <div className="hero-background">
@@ -340,9 +718,7 @@ const App = () => {
             <button
               className="primary-button"
               type="button"
-              onClick={() =>
-                scrollToSection('products')
-              }
+              onClick={handleProductsNavClick}
             >
               Explore Desserts
             </button>
@@ -359,8 +735,6 @@ const App = () => {
           </div>
         </div>
       </section>
-
-      {/* ==================== CATEGORIES ==================== */}
 
       <section className="section" id="categories">
         <div className="section-heading">
@@ -386,7 +760,7 @@ const App = () => {
             {categories.map((category, index) => (
               <button
                 className={`category-card ${
-                  selectedCategory === category.id
+Number(selectedCategory) === Number(category.id)
                     ? 'selected'
                     : ''
                 }`}
@@ -411,8 +785,6 @@ const App = () => {
           </div>
         )}
       </section>
-
-      {/* ==================== PRODUCTS ==================== */}
 
       <section
         className="section featured-section"
@@ -495,6 +867,19 @@ const App = () => {
                         2
                       )}
                     </strong>
+
+                    <button
+                      className="add-to-cart-button"
+                      type="button"
+                      onClick={() =>
+                        handleAddToCart(product)
+                      }
+                      disabled={Number(product.stock) <= 0}
+                    >
+                      {Number(product.stock) <= 0
+                        ? 'Out of Stock'
+                        : 'Add to Cart'}
+                    </button>
                   </div>
                 </article>
               );
@@ -502,8 +887,6 @@ const App = () => {
           </div>
         )}
       </section>
-
-      {/* ==================== ABOUT ==================== */}
 
       <section
         className="about-section"
@@ -529,8 +912,6 @@ const App = () => {
           </p>
         </div>
       </section>
-
-      {/* ==================== FOOTER ==================== */}
 
       <footer className="footer">
         <div>
@@ -561,8 +942,9 @@ const App = () => {
             All rights reserved.
           </p>
         </div>
-      </footer>
+       </footer>
     </div>
+    </>
   );
 };
 
