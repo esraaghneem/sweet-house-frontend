@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import './App.css';
 import api from './services/api';
-import { createOrder } from './services/orderService';
+import { createOrder, payOrder } from './services/orderService';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import sweetImage from './assets/images/pexels-vi-t-anh-nguy-n-2150409023-39240989.jpg';
 import { useCart } from './context/CartContext.jsx';
 import { useMemo } from 'react';
+
 const SPARKLE_COUNT = 30;
 
 const Sparkles = () => {
@@ -45,6 +46,7 @@ const Sparkles = () => {
     </div>
   );
 };
+
 const App = () => {
   const { user, isAuthenticated, logout } = useAuth();
 
@@ -74,6 +76,22 @@ const App = () => {
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderMessage, setOrderMessage] = useState('');
   const [orderError, setOrderError] = useState('');
+
+  const [paymentStep, setPaymentStep] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+  const [currentOrderId, setCurrentOrderId] = useState(null);
+
+  const [paymentDone, setPaymentDone] = useState(false);
+  const [paidTotal, setPaidTotal] = useState(0);
+
+  const [cardDetails, setCardDetails] = useState({
+    cardholderName: '',
+    cardNumber: '',
+    expiryDate: '',
+    cvv: '',
+  });
 
   const [darkMode, setDarkMode] = useState(() => {
     return localStorage.getItem('sweet-house-theme') === 'dark';
@@ -184,22 +202,36 @@ const App = () => {
 
     setOrderMessage('');
     setOrderError('');
+    setPaymentMessage('');
+    setPaymentError('');
   };
 
   const handleOpenCart = () => {
     setMenuOpen(false);
     setOrderMessage('');
     setOrderError('');
+    setPaymentMessage('');
+    setPaymentError('');
     setCartOpen(true);
   };
 
   const handleCloseCart = () => {
     setCartOpen(false);
+
+    if (paymentDone) {
+      setPaymentStep(false);
+      setPaymentDone(false);
+      setPaymentMessage('');
+      setCurrentOrderId(null);
+      setOrderMessage('');
+    }
   };
 
   const handlePlaceOrder = async () => {
     setOrderMessage('');
     setOrderError('');
+    setPaymentMessage('');
+    setPaymentError('');
 
     if (!isAuthenticated) {
       setCartOpen(false);
@@ -222,31 +254,19 @@ const App = () => {
 
       const response = await createOrder(items);
 
+      const orderId = response?.data?.id;
+
+      if (!orderId) {
+        throw new Error('Order ID was not returned by the server.');
+      }
+
+      setCurrentOrderId(orderId);
+      setPaymentStep(true);
+
       setOrderMessage(
-        response.message || 'Order created successfully.'
+        response.message ||
+          'Your order has been created. Please complete payment.'
       );
-
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => {
-          const orderedItem = cartItems.find(
-            (item) => item.id === product.id
-          );
-
-          if (!orderedItem) {
-            return product;
-          }
-
-          return {
-            ...product,
-            stock: Math.max(
-              0,
-              Number(product.stock) - orderedItem.quantity
-            ),
-          };
-        })
-      );
-
-      clearCart();
     } catch (error) {
       console.error('Order creation failed:', error);
 
@@ -269,23 +289,177 @@ const App = () => {
     }
   };
 
-const getProductCategoryId = (product) =>
-  Number(product.category_id ?? product.category?.id);
+  const handleCardChange = (event) => {
+    const { name } = event.target;
+    let { value } = event.target;
 
-const filteredProducts = selectedCategory
-  ? products.filter(
-      (product) =>
-        getProductCategoryId(product) === Number(selectedCategory)
-    )
-  : products;
+    if (name === 'cardNumber') {
+      value = value
+        .replace(/\D/g, '')
+        .slice(0, 16)
+        .replace(/(.{4})/g, '$1 ')
+        .trim();
+    }
 
-const getCategoryName = (categoryId) => {
-  const category = categories.find(
-    (item) => Number(item.id) === Number(categoryId)
-  );
+    if (name === 'expiryDate') {
+      value = value.replace(/\D/g, '').slice(0, 4);
 
-  return category?.name || 'Sweet House';
-};
+      if (value.length > 2) {
+        value = `${value.slice(0, 2)}/${value.slice(2)}`;
+      }
+    }
+
+    if (name === 'cvv') {
+      value = value.replace(/\D/g, '').slice(0, 4);
+    }
+
+    setCardDetails((currentDetails) => ({
+      ...currentDetails,
+      [name]: value,
+    }));
+
+    setPaymentError('');
+    setPaymentMessage('');
+  };
+
+  const handlePayment = async (event) => {
+    event.preventDefault();
+
+    setPaymentError('');
+    setPaymentMessage('');
+
+    const cardholderName =
+      cardDetails.cardholderName.trim();
+
+    const cardNumber =
+      cardDetails.cardNumber.replace(/\s/g, '');
+
+    const expiryDate =
+      cardDetails.expiryDate.trim();
+
+    const cvv =
+      cardDetails.cvv.trim();
+
+    if (!cardholderName) {
+      setPaymentError(
+        'Please enter the cardholder name.'
+      );
+      return;
+    }
+
+    if (!/^\d{16}$/.test(cardNumber)) {
+      setPaymentError(
+        'Please enter a valid 16-digit card number.'
+      );
+      return;
+    }
+
+    if (!/^\d{2}\/\d{2}$/.test(expiryDate)) {
+      setPaymentError(
+        'Please enter the expiry date in MM/YY format.'
+      );
+      return;
+    }
+
+    if (!/^\d{3,4}$/.test(cvv)) {
+      setPaymentError(
+        'Please enter a valid CVV.'
+      );
+      return;
+    }
+
+    if (!currentOrderId) {
+      setPaymentError(
+        'Order information is missing. Please try again.'
+      );
+      return;
+    }
+
+    setPaymentLoading(true);
+
+    try {
+      const response = await payOrder(currentOrderId);
+
+      setPaidTotal(cartTotal);
+      setPaymentDone(true);
+
+      setPaymentMessage(
+        response.message ||
+          'Payment successful! Your order is confirmed.'
+      );
+
+      setProducts((currentProducts) =>
+        currentProducts.map((product) => {
+          const orderedItem = cartItems.find(
+            (item) => item.id === product.id
+          );
+
+          if (!orderedItem) {
+            return product;
+          }
+
+          return {
+            ...product,
+            stock: Math.max(
+              0,
+              Number(product.stock) -
+                orderedItem.quantity
+            ),
+          };
+        })
+      );
+
+      clearCart();
+
+      setCardDetails({
+        cardholderName: '',
+        cardNumber: '',
+        expiryDate: '',
+        cvv: '',
+      });
+    } catch (error) {
+      console.error('Payment failed:', error);
+
+      const backendMessage =
+        error.response?.data?.message;
+
+      setPaymentError(
+        backendMessage ||
+          'Payment failed. Please check your details and try again.'
+      );
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const handleBackToCart = () => {
+    setPaymentStep(false);
+    setPaymentMessage('');
+    setPaymentError('');
+  };
+
+  const getProductCategoryId = (product) =>
+    Number(
+      product.category_id ??
+        product.category?.id
+    );
+
+  const filteredProducts = selectedCategory
+    ? products.filter(
+        (product) =>
+          getProductCategoryId(product) ===
+          Number(selectedCategory)
+      )
+    : products;
+
+  const getCategoryName = (categoryId) => {
+    const category = categories.find(
+      (item) =>
+        Number(item.id) === Number(categoryId)
+    );
+
+    return category?.name || 'Sweet House';
+  };
 
   const getCategoryIcon = (index) => {
     const icons = [
@@ -345,605 +519,839 @@ const getCategoryName = (categoryId) => {
     );
   }
 
-    return (
+  return (
     <>
-<Sparkles />
+      <Sparkles />
 
-  <div className="app">
+      <div className="app">
         <nav className="navbar">
-        <button
-          className="logo"
-          onClick={handleHomeNavClick}
-          type="button"
-        >
-          Sweet House
-        </button>
-
-        <div className="nav-links">
           <button
-            type="button"
+            className="logo"
             onClick={handleHomeNavClick}
-          >
-            Home
-          </button>
-
-          <button
             type="button"
-            onClick={handleProductsNavClick}
           >
-            Products
+            Sweet House
           </button>
 
-          <button
-            type="button"
-            onClick={() => scrollToSection('categories')}
-          >
-            Categories
-          </button>
-
-          <button
-            type="button"
-            onClick={() => scrollToSection('about')}
-          >
-            About
-          </button>
-        </div>
-
-        <div className="nav-actions">
-          {isAuthenticated && (
-            <span className="welcome-user">
-              Hi, {user?.name}
-            </span>
-          )}
-
-          <div className="nav-menu-wrapper">
+          <div className="nav-links">
             <button
-              className={`menu-button ${
-                menuOpen ? 'active' : ''
-              }`}
-              onClick={() => setMenuOpen(!menuOpen)}
-              aria-label="Open menu"
-              aria-expanded={menuOpen}
               type="button"
+              onClick={handleHomeNavClick}
             >
-              <span></span>
-              <span></span>
-              <span></span>
+              Home
             </button>
 
-            {menuOpen && (
-              <>
-                <div
-                  className="menu-overlay"
-                  onClick={() => setMenuOpen(false)}
-                ></div>
-
-                <div className="nav-dropdown">
-                  <button
-                    className="dropdown-item"
-                    type="button"
-                    onClick={handleOpenCart}
-                  >
-                    <span>🛍</span>
-                    Cart
-
-                    {cartCount > 0 && (
-                      <span className="cart-count">
-                        {cartCount}
-                      </span>
-                    )}
-                  </button>
-
-                  {isAuthenticated ? (
-                    <button
-                      className="dropdown-item"
-                      type="button"
-                      onClick={handleLogout}
-                    >
-                      <span>↪</span>
-                      Logout
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        className="dropdown-item"
-                        type="button"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          setAuthPage('login');
-                        }}
-                      >
-                        <span>→</span>
-                        Login
-                      </button>
-
-                      <button
-                        className="dropdown-item"
-                        type="button"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          setAuthPage('register');
-                        }}
-                      >
-                        <span>＋</span>
-                        Register
-                      </button>
-                    </>
-                  )}
-
-                  <div className="dropdown-divider"></div>
-
-                  <button
-                    className="dropdown-item theme-item"
-                    type="button"
-                    onClick={toggleDarkMode}
-                  >
-                    <span>{darkMode ? '☀' : '☾'}</span>
-                    {darkMode
-                      ? 'Light mode'
-                      : 'Dark mode'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
-
-      {cartOpen && (
-        <>
-          <div
-            className="cart-drawer-overlay"
-            onClick={handleCloseCart}
-          ></div>
-
-          <aside className="cart-drawer">
-            <div className="cart-drawer-header">
-              <div>
-                <span className="cart-drawer-label">
-                  YOUR ORDER
-                </span>
-
-                <h2>Your Cart</h2>
-              </div>
-
-              <button
-                className="cart-close-button"
-                type="button"
-                onClick={handleCloseCart}
-                aria-label="Close cart"
-              >
-                ×
-              </button>
-            </div>
-
-            {cartItems.length === 0 ? (
-              <div className="cart-drawer-empty">
-                <div className="cart-empty-icon">🛍</div>
-
-                <h3>Your cart is empty</h3>
-
-                <p>
-                  Add some delicious desserts and they
-                  will appear here.
-                </p>
-
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={() => {
-                    setCartOpen(false);
-                    scrollToSection('products');
-                  }}
-                >
-                  Explore Desserts
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="cart-drawer-items">
-                  {cartItems.map((item) => {
-                    const imageUrl = getImageUrl(
-                      item.image
-                    );
-
-                    return (
-                      <div
-                        className="cart-drawer-item"
-                        key={item.id}
-                      >
-                        <div className="cart-drawer-item-image">
-                          {imageUrl ? (
-                            <img
-                              src={imageUrl}
-                              alt={item.name}
-                            />
-                          ) : (
-                            <span>Sweet House</span>
-                          )}
-                        </div>
-
-                        <div className="cart-drawer-item-content">
-                          <div className="cart-drawer-item-top">
-                            <div>
-                              <span className="cart-item-category">
-                                {getCategoryName(
-                                  item.category_id
-                                )}
-                              </span>
-
-                              <h3>{item.name}</h3>
-                            </div>
-
-                            <button
-                              className="cart-remove-button"
-                              type="button"
-                              onClick={() =>
-                                removeFromCart(item.id)
-                              }
-                              aria-label={`Remove ${item.name}`}
-                            >
-                              ×
-                            </button>
-                          </div>
-
-                          <div className="cart-drawer-item-bottom">
-                            <strong>
-                              $
-                              {Number(item.price).toFixed(
-                                2
-                              )}
-                            </strong>
-
-                            <div className="cart-quantity-controls">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  decreaseQuantity(item.id)
-                                }
-                                aria-label="Decrease quantity"
-                              >
-                                −
-                              </button>
-
-                              <span>{item.quantity}</span>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  increaseQuantity(item.id)
-                                }
-                                aria-label="Increase quantity"
-                              >
-                                +
-                              </button>
-                            </div>
-
-                            <span className="cart-drawer-subtotal">
-                              $
-                              {(
-                                Number(item.price) *
-                                item.quantity
-                              ).toFixed(2)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="cart-drawer-footer">
-                  <div className="cart-drawer-summary">
-                    <div>
-                      <span>Items</span>
-                      <strong>{cartCount}</strong>
-                    </div>
-
-                    <div className="cart-drawer-total">
-                      <span>Total</span>
-                      <strong>
-                        ${cartTotal.toFixed(2)}
-                      </strong>
-                    </div>
-                  </div>
-
-                  {orderMessage && (
-                    <div className="order-success">
-                      {orderMessage}
-                    </div>
-                  )}
-
-                  {orderError && (
-                    <div className="order-error">
-                      {orderError}
-                    </div>
-                  )}
-
-                  <button
-                    className="place-order-button"
-                    type="button"
-                    onClick={handlePlaceOrder}
-                    disabled={orderLoading}
-                  >
-                    {orderLoading
-                      ? 'Placing Order...'
-                      : 'Place Order'}
-                  </button>
-
-                  <button
-                    className="clear-cart-button"
-                    type="button"
-                    onClick={() => {
-                      clearCart();
-                      setOrderMessage('');
-                      setOrderError('');
-                    }}
-                  >
-                    Clear Cart
-                  </button>
-                </div>
-              </>
-            )}
-          </aside>
-        </>
-      )}
-
-      <section className="hero" id="home">
-        <div className="hero-background">
-          <img
-            src={sweetImage}
-            alt="Sweet House desserts"
-          />
-        </div>
-
-        <div className="hero-overlay"></div>
-
-        <div className="hero-content">
-          <span className="hero-label">SWEET HOUSE</span>
-
-          <h1>
-            Sweet moments,
-            <br />
-            <span>made fresh.</span>
-          </h1>
-
-          <p>
-            Happiness is something sweet. Discover carefully
-            made desserts created to make every moment a
-            little more special.
-          </p>
-
-          <div className="hero-actions">
             <button
-              className="primary-button"
               type="button"
               onClick={handleProductsNavClick}
             >
-              Explore Desserts
+              Products
             </button>
 
             <button
-              className="secondary-button"
               type="button"
               onClick={() =>
                 scrollToSection('categories')
               }
             >
-              View Categories
+              Categories
             </button>
-          </div>
-        </div>
-      </section>
 
-      <section className="section" id="categories">
-        <div className="section-heading">
-          <span>DISCOVER</span>
-
-          <h2>Our Categories</h2>
-
-          <p>
-            Find something delicious for every sweet moment.
-          </p>
-        </div>
-
-        {loadingCategories ? (
-          <div className="loading-message">
-            Loading categories...
-          </div>
-        ) : categories.length === 0 ? (
-          <div className="empty-message">
-            No categories available.
-          </div>
-        ) : (
-          <div className="categories-grid">
-            {categories.map((category, index) => (
-              <button
-                className={`category-card ${
-Number(selectedCategory) === Number(category.id)
-                    ? 'selected'
-                    : ''
-                }`}
-                key={category.id}
-                type="button"
-                onClick={() =>
-                  handleCategoryClick(category.id)
-                }
-              >
-                <div className="category-icon">
-                  {getCategoryIcon(index)}
-                </div>
-
-                <h3>{category.name}</h3>
-
-                <p>
-                  Discover our delicious{' '}
-                  {category.name} collection.
-                </p>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section
-        className="section featured-section"
-        id="products"
-      >
-        <div className="section-heading">
-          <span>OUR MENU</span>
-
-          <h2>
-            {selectedCategory
-              ? getCategoryName(selectedCategory)
-              : 'Sweet Selection'}
-          </h2>
-
-          <p>
-            Freshly made desserts, ready to make your day
-            sweeter.
-          </p>
-
-          {selectedCategory && (
             <button
-              className="clear-filter-button"
               type="button"
               onClick={() =>
-                setSelectedCategory(null)
+                scrollToSection('about')
               }
             >
-              Show all products
+              About
             </button>
-          )}
-        </div>
-
-        {loadingProducts ? (
-          <div className="loading-message">
-            Loading products...
           </div>
-        ) : filteredProducts.length === 0 ? (
-          <div className="empty-message">
-            No products available.
-          </div>
-        ) : (
-          <div className="products-grid">
-            {filteredProducts.map((product) => {
-              const imageUrl = getImageUrl(
-                product.image
-              );
 
-              return (
-                <article
-                  className="product-card"
-                  key={product.id}
-                >
-                  <div className="product-image">
-                    {imageUrl ? (
-                      <img
-                        src={imageUrl}
-                        alt={product.name}
-                      />
+          <div className="nav-actions">
+            {isAuthenticated && (
+              <span className="welcome-user">
+                Hi, {user?.name}
+              </span>
+            )}
+
+            <div className="nav-menu-wrapper">
+              <button
+                className={`menu-button ${
+                  menuOpen ? 'active' : ''
+                }`}
+                onClick={() =>
+                  setMenuOpen(!menuOpen)
+                }
+                aria-label="Open menu"
+                aria-expanded={menuOpen}
+                type="button"
+              >
+                <span></span>
+                <span></span>
+                <span></span>
+              </button>
+
+              {menuOpen && (
+                <>
+                  <div
+                    className="menu-overlay"
+                    onClick={() =>
+                      setMenuOpen(false)
+                    }
+                  ></div>
+
+                  <div className="nav-dropdown">
+                    <button
+                      className="dropdown-item"
+                      type="button"
+                      onClick={handleOpenCart}
+                    >
+                      <span>🛍</span>
+                      Cart
+
+                      {cartCount > 0 && (
+                        <span className="cart-count">
+                          {cartCount}
+                        </span>
+                      )}
+                    </button>
+
+                    {isAuthenticated ? (
+                      <button
+                        className="dropdown-item"
+                        type="button"
+                        onClick={handleLogout}
+                      >
+                        <span>↪</span>
+                        Logout
+                      </button>
                     ) : (
-                      <span>Sweet House</span>
+                      <>
+                        <button
+                          className="dropdown-item"
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setAuthPage('login');
+                          }}
+                        >
+                          <span>→</span>
+                          Login
+                        </button>
+
+                        <button
+                          className="dropdown-item"
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setAuthPage('register');
+                          }}
+                        >
+                          <span>＋</span>
+                          Register
+                        </button>
+                      </>
                     )}
-                  </div>
 
-                  <div className="product-info">
-                    <span>
-                      {getCategoryName(
-                        product.category_id
-                      )}
-                    </span>
-
-                    <h3>{product.name}</h3>
-
-                    {product.description && (
-                      <p>{product.description}</p>
-                    )}
-
-                    <strong>
-                      $
-                      {Number(product.price).toFixed(
-                        2
-                      )}
-                    </strong>
+                    <div className="dropdown-divider"></div>
 
                     <button
-                      className="add-to-cart-button"
+                      className="dropdown-item theme-item"
                       type="button"
-                      onClick={() =>
-                        handleAddToCart(product)
-                      }
-                      disabled={Number(product.stock) <= 0}
+                      onClick={toggleDarkMode}
                     >
-                      {Number(product.stock) <= 0
-                        ? 'Out of Stock'
-                        : 'Add to Cart'}
+                      <span>
+                        {darkMode ? '☀' : '☾'}
+                      </span>
+                      {darkMode
+                        ? 'Light mode'
+                        : 'Dark mode'}
                     </button>
                   </div>
-                </article>
-              );
-            })}
+                </>
+              )}
+            </div>
           </div>
+        </nav>
+
+        {cartOpen && (
+          <>
+            <div
+              className="cart-drawer-overlay"
+              onClick={handleCloseCart}
+            ></div>
+
+            <aside className="cart-drawer">
+              <div className="cart-drawer-header">
+                <div>
+                  <span className="cart-drawer-label">
+                    {paymentStep
+                      ? 'SECURE CHECKOUT'
+                      : 'YOUR ORDER'}
+                  </span>
+
+                  <h2>
+                    {paymentStep
+                      ? 'Payment'
+                      : 'Your Cart'}
+                  </h2>
+                </div>
+
+                <button
+                  className="cart-close-button"
+                  type="button"
+                  onClick={handleCloseCart}
+                  aria-label="Close cart"
+                >
+                  ×
+                </button>
+              </div>
+
+              {paymentStep ? (
+                paymentDone ? (
+                  <div className="payment-success">
+                    <div className="payment-success-icon">
+                      ✓
+                    </div>
+
+                    <h3>Thank you!</h3>
+
+                    <p>
+                      {paymentMessage ||
+                        'Your payment was successful and your order is confirmed.'}
+                    </p>
+
+                    <div className="payment-success-total">
+                      <span>Amount paid</span>
+
+                      <strong>
+                        ${paidTotal.toFixed(2)}
+                      </strong>
+                    </div>
+
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={handleCloseCart}
+                    >
+                      Continue Shopping
+                    </button>
+                  </div>
+                ) : (
+                  <div className="payment-section">
+                    <div className="credit-card">
+                      <div className="credit-card-top">
+                        <span className="credit-card-brand">
+                          Sweet House
+                        </span>
+
+                        <span className="credit-card-chip"></span>
+                      </div>
+
+                      <div className="credit-card-number">
+                        {cardDetails.cardNumber ||
+                          '•••• •••• •••• ••••'}
+                      </div>
+
+                      <div className="credit-card-bottom">
+                        <div>
+                          <small>Card Holder</small>
+
+                          <span>
+                            {cardDetails.cardholderName ||
+                              'YOUR NAME'}
+                          </span>
+                        </div>
+
+                        <div>
+                          <small>Expires</small>
+
+                          <span>
+                            {cardDetails.expiryDate ||
+                              'MM/YY'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="payment-summary">
+                      <span>Order Total</span>
+
+                      <strong>
+                        ${cartTotal.toFixed(2)}
+                      </strong>
+                    </div>
+
+                    {paymentError && (
+                      <div className="order-error">
+                        {paymentError}
+                      </div>
+                    )}
+
+                    <form
+                      className="payment-form"
+                      onSubmit={handlePayment}
+                    >
+                      <label>
+                        <span>Cardholder Name</span>
+
+                        <input
+                          type="text"
+                          name="cardholderName"
+                          value={
+                            cardDetails.cardholderName
+                          }
+                          onChange={handleCardChange}
+                          placeholder="Name on card"
+                          autoComplete="cc-name"
+                        />
+                      </label>
+
+                      <label>
+                        <span>Card Number</span>
+
+                        <input
+                          type="text"
+                          name="cardNumber"
+                          value={
+                            cardDetails.cardNumber
+                          }
+                          onChange={handleCardChange}
+                          placeholder="1234 5678 9012 3456"
+                          maxLength="19"
+                          inputMode="numeric"
+                          autoComplete="cc-number"
+                        />
+                      </label>
+
+                      <div className="payment-form-row">
+                        <label>
+                          <span>Expiry Date</span>
+
+                          <input
+                            type="text"
+                            name="expiryDate"
+                            value={
+                              cardDetails.expiryDate
+                            }
+                            onChange={handleCardChange}
+                            placeholder="MM/YY"
+                            maxLength="5"
+                            inputMode="numeric"
+                            autoComplete="cc-exp"
+                          />
+                        </label>
+
+                        <label>
+                          <span>CVV</span>
+
+                          <input
+                            type="password"
+                            name="cvv"
+                            value={cardDetails.cvv}
+                            onChange={handleCardChange}
+                            placeholder="•••"
+                            maxLength="4"
+                            inputMode="numeric"
+                            autoComplete="cc-csc"
+                          />
+                        </label>
+                      </div>
+
+                      <button
+                        className="place-order-button"
+                        type="submit"
+                        disabled={paymentLoading}
+                      >
+                        {paymentLoading
+                          ? 'Processing Payment...'
+                          : `Pay $${cartTotal.toFixed(2)}`}
+                      </button>
+
+                      <button
+                        className="clear-cart-button"
+                        type="button"
+                        onClick={handleBackToCart}
+                        disabled={paymentLoading}
+                      >
+                        ← Back to Cart
+                      </button>
+                    </form>
+
+                    <p className="payment-note">
+                      🔒 This is a simulated payment. No
+                      real charge is made.
+                    </p>
+                  </div>
+                )
+              ) : cartItems.length === 0 ? (
+                <div className="cart-drawer-empty">
+                  <div className="cart-empty-icon">
+                    🛍
+                  </div>
+
+                  <h3>Your cart is empty</h3>
+
+                  <p>
+                    Add some delicious desserts and
+                    they will appear here.
+                  </p>
+
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => {
+                      setCartOpen(false);
+                      scrollToSection('products');
+                    }}
+                  >
+                    Explore Desserts
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="cart-drawer-items">
+                    {cartItems.map((item) => {
+                      const imageUrl = getImageUrl(
+                        item.image
+                      );
+
+                      return (
+                        <div
+                          className="cart-drawer-item"
+                          key={item.id}
+                        >
+                          <div className="cart-drawer-item-image">
+                            {imageUrl ? (
+                              <img
+                                src={imageUrl}
+                                alt={item.name}
+                              />
+                            ) : (
+                              <span>
+                                Sweet House
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="cart-drawer-item-content">
+                            <div className="cart-drawer-item-top">
+                              <div>
+                                <span className="cart-item-category">
+                                  {getCategoryName(
+                                    item.category_id
+                                  )}
+                                </span>
+
+                                <h3>{item.name}</h3>
+                              </div>
+
+                              <button
+                                className="cart-remove-button"
+                                type="button"
+                                onClick={() =>
+                                  removeFromCart(
+                                    item.id
+                                  )
+                                }
+                                aria-label={`Remove ${item.name}`}
+                              >
+                                ×
+                              </button>
+                            </div>
+
+                            <div className="cart-drawer-item-bottom">
+                              <strong>
+                                $
+                                {Number(
+                                  item.price
+                                ).toFixed(2)}
+                              </strong>
+
+                              <div className="cart-quantity-controls">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    decreaseQuantity(
+                                      item.id
+                                    )
+                                  }
+                                  aria-label="Decrease quantity"
+                                >
+                                  −
+                                </button>
+
+                                <span>
+                                  {item.quantity}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    increaseQuantity(
+                                      item.id
+                                    )
+                                  }
+                                  aria-label="Increase quantity"
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              <span className="cart-drawer-subtotal">
+                                $
+                                {(
+                                  Number(
+                                    item.price
+                                  ) *
+                                  item.quantity
+                                ).toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="cart-drawer-footer">
+                    <div className="cart-drawer-summary">
+                      <div>
+                        <span>Items</span>
+                        <strong>
+                          {cartCount}
+                        </strong>
+                      </div>
+
+                      <div className="cart-drawer-total">
+                        <span>Total</span>
+                        <strong>
+                          $
+                          {cartTotal.toFixed(2)}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {orderMessage && (
+                      <div className="order-success">
+                        {orderMessage}
+                      </div>
+                    )}
+
+                    {orderError && (
+                      <div className="order-error">
+                        {orderError}
+                      </div>
+                    )}
+
+                    <button
+                      className="place-order-button"
+                      type="button"
+                      onClick={handlePlaceOrder}
+                      disabled={orderLoading}
+                    >
+                      {orderLoading
+                        ? 'Placing Order...'
+                        : 'Continue to Payment'}
+                    </button>
+
+                    <button
+                      className="clear-cart-button"
+                      type="button"
+                      onClick={() => {
+                        clearCart();
+                        setOrderMessage('');
+                        setOrderError('');
+                      }}
+                    >
+                      Clear Cart
+                    </button>
+                  </div>
+                </>
+              )}
+            </aside>
+          </>
         )}
-      </section>
 
-      <section
-        className="about-section"
-        id="about"
-      >
-        <div>
-          <span>ABOUT SWEET HOUSE</span>
+        <section className="hero" id="home">
+          <div className="hero-background">
+            <img
+              src={sweetImage}
+              alt="Sweet House desserts"
+            />
+          </div>
 
-          <h2>
-            Made with care,
-            <br />
-            served with love.
-          </h2>
-        </div>
+          <div className="hero-overlay"></div>
 
-        <div>
-          <p>
-            Sweet House is a place for people who believe
-            that small sweet moments can make a big
-            difference. We bring together carefully
-            selected desserts in a warm and welcoming
-            experience.
-          </p>
-        </div>
-      </section>
+          <div className="hero-content">
+            <span className="hero-label">
+              SWEET HOUSE
+            </span>
 
-      <footer className="footer">
-        <div>
-          <h3>Sweet House</h3>
+            <h1>
+              Sweet moments,
+              <br />
+              <span>made fresh.</span>
+            </h1>
 
-          <p>
-            Happiness is something sweet.
-          </p>
-        </div>
+            <p>
+              Happiness is something sweet. Discover
+              carefully made desserts created to make
+              every moment a little more special.
+            </p>
 
-        <div className="footer-contact">
-          <h4>Contact</h4>
+            <div className="hero-actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={handleProductsNavClick}
+              >
+                Explore Desserts
+              </button>
 
-          <a href="mailto:hello@sweethouse.com">
-            hello@sweethouse.com
-          </a>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() =>
+                  scrollToSection('categories')
+                }
+              >
+                View Categories
+              </button>
+            </div>
+          </div>
+        </section>
 
-          <a href="tel:+963000000000">
-            <span className="phone-icon">☎</span>
-            +963 000 000 000
-          </a>
-        </div>
+        <section
+          className="section"
+          id="categories"
+        >
+          <div className="section-heading">
+            <span>DISCOVER</span>
 
-        <div className="footer-copy">
-          <p>
-            © {new Date().getFullYear()} Sweet House.
-            <br />
-            All rights reserved.
-          </p>
-        </div>
-       </footer>
-    </div>
+            <h2>Our Categories</h2>
+
+            <p>
+              Find something delicious for every
+              sweet moment.
+            </p>
+          </div>
+
+          {loadingCategories ? (
+            <div className="loading-message">
+              Loading categories...
+            </div>
+          ) : categories.length === 0 ? (
+            <div className="empty-message">
+              No categories available.
+            </div>
+          ) : (
+            <div className="categories-grid">
+              {categories.map((category, index) => (
+                <button
+                  className={`category-card ${
+                    Number(selectedCategory) ===
+                    Number(category.id)
+                      ? 'selected'
+                      : ''
+                  }`}
+                  key={category.id}
+                  type="button"
+                  onClick={() =>
+                    handleCategoryClick(
+                      category.id
+                    )
+                  }
+                >
+                  <div className="category-icon">
+                    {getCategoryIcon(index)}
+                  </div>
+
+                  <h3>{category.name}</h3>
+
+                  <p>
+                    Discover our delicious{' '}
+                    {category.name} collection.
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section
+          className="section featured-section"
+          id="products"
+        >
+          <div className="section-heading">
+            <span>OUR MENU</span>
+
+            <h2>
+              {selectedCategory
+                ? getCategoryName(
+                    selectedCategory
+                  )
+                : 'Sweet Selection'}
+            </h2>
+
+            <p>
+              Freshly made desserts, ready to make
+              your day sweeter.
+            </p>
+
+            {selectedCategory && (
+              <button
+                className="clear-filter-button"
+                type="button"
+                onClick={() =>
+                  setSelectedCategory(null)
+                }
+              >
+                Show all products
+              </button>
+            )}
+          </div>
+
+          {loadingProducts ? (
+            <div className="loading-message">
+              Loading products...
+            </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="empty-message">
+              No products available.
+            </div>
+          ) : (
+            <div className="products-grid">
+              {filteredProducts.map((product) => {
+                const imageUrl = getImageUrl(
+                  product.image
+                );
+
+                return (
+                  <article
+                    className="product-card"
+                    key={product.id}
+                  >
+                    <div className="product-image">
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={product.name}
+                        />
+                      ) : (
+                        <span>Sweet House</span>
+                      )}
+                    </div>
+
+                    <div className="product-info">
+                      <span>
+                        {getCategoryName(
+                          product.category_id
+                        )}
+                      </span>
+
+                      <h3>{product.name}</h3>
+
+                      {product.description && (
+                        <p>
+                          {product.description}
+                        </p>
+                      )}
+
+                      <strong>
+                        $
+                        {Number(
+                          product.price
+                        ).toFixed(2)}
+                      </strong>
+
+                      <button
+                        className="add-to-cart-button"
+                        type="button"
+                        onClick={() =>
+                          handleAddToCart(
+                            product
+                          )
+                        }
+                        disabled={
+                          Number(
+                            product.stock
+                          ) <= 0
+                        }
+                      >
+                        {Number(
+                          product.stock
+                        ) <= 0
+                          ? 'Out of Stock'
+                          : 'Add to Cart'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section
+          className="about-section"
+          id="about"
+        >
+          <div>
+            <span>ABOUT SWEET HOUSE</span>
+
+            <h2>
+              Made with care,
+              <br />
+              served with love.
+            </h2>
+          </div>
+
+          <div>
+            <p>
+              Sweet House is a place for people who
+              believe that small sweet moments can make
+              a big difference. We bring together
+              carefully selected desserts in a warm and
+              welcoming experience.
+            </p>
+          </div>
+        </section>
+
+        <footer className="footer">
+          <div>
+            <h3>Sweet House</h3>
+
+            <p>
+              Happiness is something sweet.
+            </p>
+          </div>
+
+          <div className="footer-contact">
+            <h4>Contact</h4>
+
+            <a href="mailto:hello@sweethouse.com">
+              hello@sweethouse.com
+            </a>
+
+            <a href="tel:+963000000000">
+              <span className="phone-icon">
+                ☎
+              </span>
+              +963 000 000 000
+            </a>
+          </div>
+
+          <div className="footer-copy">
+            <p>
+              © {new Date().getFullYear()} Sweet
+              House.
+              <br />
+              All rights reserved.
+            </p>
+          </div>
+        </footer>
+      </div>
     </>
   );
 };

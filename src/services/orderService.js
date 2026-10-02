@@ -19,3 +19,11 @@ export const getOrder = async (id) => {
 
   return response.data;
 };
+
+export const payOrder = async (orderId) => {
+  const response = await api.post(
+    `/orders/${orderId}/payment`
+  );
+
+  return response.data;
+};
