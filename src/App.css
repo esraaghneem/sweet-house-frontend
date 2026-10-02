@@ -2639,14 +2639,19 @@ min-height: clamp(600px, 78vh, 780px);
     padding-bottom: 60px;
   }
 
-  .hero-background img {
-    opacity: 0.25;
-  }
+ .hero-background img {
+  opacity: 0.38;
+  object-fit: cover;
+  object-position: center center;
+  transform: scale(1);
+}
 
-  [data-theme='dark'] .hero-background img {
-    opacity: 0.20;
-  }
-
+[data-theme='dark'] .hero-background img {
+  opacity: 0.32;
+  object-fit: cover;
+  object-position: center center;
+  transform: scale(1);
+}
   .hero h1 {
     font-size: clamp(42px, 12vw, 52px);
   }
@@ -2983,4 +2988,5 @@ min-height: clamp(600px, 78vh, 780px);
       drop-shadow(0 0 18px rgba(247, 205, 92, 1))
       drop-shadow(0 0 28px rgba(230, 177, 55, 0.85));
   }
+  
 }
