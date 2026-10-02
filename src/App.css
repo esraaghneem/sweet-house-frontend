@@ -2639,18 +2639,36 @@ min-height: clamp(600px, 78vh, 780px);
     padding-bottom: 60px;
   }
 
- .hero-background img {
-  opacity: 0.38;
+.hero-background img {
+  opacity: 0.55;
   object-fit: cover;
   object-position: center center;
   transform: scale(1);
 }
 
 [data-theme='dark'] .hero-background img {
-  opacity: 0.32;
+  opacity: 0.45;
   object-fit: cover;
   object-position: center center;
   transform: scale(1);
+}
+
+.hero-overlay {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(250, 247, 242, 0.65),
+      rgba(250, 247, 242, 0.35)
+    );
+}
+
+[data-theme='dark'] .hero-overlay {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(48, 43, 46, 0.70),
+      rgba(48, 43, 46, 0.40)
+    );
 }
   .hero h1 {
     font-size: clamp(42px, 12vw, 52px);
