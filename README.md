@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A modern React frontend for a dessert e-commerce application.
+  A modern full-stack dessert e-commerce application built with React and Laravel.
 </p>
 
 <p align="center">
@@ -35,17 +35,19 @@
 
 ## 🍰 About Sweet House
 
-**Sweet House** is a modern dessert e-commerce frontend built with **React and Vite**.
+**Sweet House** is a modern full-stack dessert e-commerce application built with **React and Laravel**.
 
 The application provides a complete customer shopping experience where users can browse dessert products, explore categories, create an account, log in, manage their shopping cart, create orders, and complete a simulated payment process.
 
-The frontend communicates with a Laravel REST API backend using Axios.
+The React frontend communicates with a Laravel REST API backend using Axios.
 
-The project focuses on a clean user interface, reusable React components, organized state management, authentication handling, and a responsive shopping experience.
+The project focuses on clean architecture, reusable components, organized state management, authentication, API communication, order processing, and a responsive shopping experience.
 
 ---
 
 ## 🛠️ Technologies
+
+### Frontend
 
 - React
 - Vite
@@ -53,8 +55,14 @@ The project focuses on a clean user interface, reusable React components, organi
 - Axios
 - CSS
 - React Context API
-- Laravel REST API
-- Laravel Sanctum Authentication
+
+### Backend
+
+- Laravel 12
+- PHP
+- MySQL
+- Laravel Sanctum
+- REST API
 
 ---
 
@@ -79,6 +87,7 @@ The project focuses on a clean user interface, reusable React components, organi
 - Display product stock
 - Product images
 - Active product handling
+- Product and category management through the Laravel API
 
 ### 🛒 Shopping Cart
 
@@ -98,6 +107,7 @@ The project focuses on a clean user interface, reusable React components, organi
 - Receive the created order
 - Track the current order during checkout
 - Handle order success and error messages
+- Stock validation and management through the backend
 
 ### 💳 Simulated Payment
 
@@ -128,9 +138,11 @@ The interface is designed to work across different screen sizes, including deskt
 
 ---
 
-## 🏗️ Frontend Structure
+## 🏗️ Project Structure
 
-The project is organized into separate areas for authentication, cart management, API communication, and pages.
+The project is divided into a React frontend and Laravel backend.
+
+### Frontend Structure
 
 ~~~text
 src/
@@ -153,6 +165,27 @@ src/
 ├── App.css
 ├── index.css
 └── main.jsx
+~~~
+
+### Backend Structure
+
+~~~text
+app/
+├── Http/
+│   ├── Controllers/
+│   │   └── Api/
+│   ├── Requests/
+│   └── Resources/
+│
+├── Models/
+├── Services/
+│
+database/
+├── migrations/
+└── seeders/
+
+routes/
+└── api.php
 ~~~
 
 ---
@@ -187,7 +220,7 @@ Order Confirmed
 
 ## 🔗 API Communication
 
-The frontend communicates with the Laravel backend through Axios.
+The React frontend communicates with the Laravel backend through Axios.
 
 The API base URL is configured as:
 
@@ -205,10 +238,16 @@ Authentication
 └── Get User
 
 Categories
-└── Get Categories
+├── List Categories
+├── Create Category
+├── Update Category
+└── Delete Category
 
 Products
-└── Get Products
+├── List Products
+├── Create Product
+├── Update Product
+└── Delete Product
 
 Orders
 ├── Create Order
@@ -221,7 +260,7 @@ Orders
 
 ## 📂 State Management
 
-The application uses the **React Context API** for shared application state.
+The frontend uses the **React Context API** for shared application state.
 
 ### AuthContext
 
@@ -248,9 +287,43 @@ Responsible for shopping cart state and operations, including:
 
 ---
 
+## 🏗️ Backend Architecture
+
+The Laravel backend follows a structured architecture that separates responsibilities between different layers.
+
+~~~text
+Request
+   ↓
+Route
+   ↓
+Controller
+   ↓
+Form Request
+   ↓
+Service
+   ↓
+Model
+   ↓
+Database
+~~~
+
+The backend includes:
+
+- RESTful API endpoints
+- Form Request validation
+- Service layer for business logic
+- API Resources
+- Eloquent relationships
+- Authentication with Laravel Sanctum
+- Database transactions
+- Stock validation and management
+- Order and order-item handling
+
+---
+
 ## 🚀 Installation
 
-Clone the repository:
+Clone the frontend repository:
 
 ~~~bash
 git clone https://github.com/esraaghneem/sweet-house-frontend.git
@@ -290,7 +363,19 @@ Backend repository:
 
 https://github.com/esraaghneem/sweet-house-backend
 
-Start the Laravel backend with:
+Clone the backend repository separately and install its dependencies:
+
+~~~bash
+composer install
+~~~
+
+Configure the database in the `.env` file, then run:
+
+~~~bash
+php artisan migrate
+~~~
+
+Start the Laravel backend:
 
 ~~~bash
 php artisan serve
@@ -308,13 +393,13 @@ Make sure the Laravel API is running before using authentication, products, cate
 
 ## 🧪 Development
 
-Run the development server:
+Run the frontend development server:
 
 ~~~bash
 npm run dev
 ~~~
 
-Build the project for production:
+Build the frontend for production:
 
 ~~~bash
 npm run build
@@ -350,7 +435,18 @@ npm run lint
 
 **Esraa Ghneem**
 
-Backend Developer
+Full-Stack Developer
+
+Worked on both the frontend and backend of the Sweet House application, including:
+
+- React frontend development
+- Laravel REST API development
+- MySQL database integration
+- Authentication and authorization
+- Shopping cart functionality
+- Order processing
+- Simulated payment integration
+- API integration between frontend and backend
 
 [GitHub](https://github.com/esraaghneem)
 
