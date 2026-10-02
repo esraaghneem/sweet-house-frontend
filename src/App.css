@@ -2063,7 +2063,39 @@ min-height: clamp(600px, 78vh, 780px);
   bottom: -190px;
   right: -150px;
 }
+/* ---------- Register brand side: dark mode ---------- */
 
+[data-theme='dark'] .auth-brand-side {
+  background:
+    radial-gradient(
+      circle at 18% 12%,
+      rgba(232, 206, 184, 0.16) 0%,
+      transparent 52%
+    ),
+    linear-gradient(
+      145deg,
+      #6b565d 0%,
+      #594851 55%,
+      #4c3e45 100%
+    );
+}
+
+[data-theme='dark'] .auth-brand-side::before {
+  border-color: rgba(241, 230, 232, 0.12);
+}
+
+[data-theme='dark'] .auth-brand-side::after {
+  border-color: rgba(241, 230, 232, 0.08);
+}
+
+[data-theme='dark'] .auth-small-title,
+[data-theme='dark'] .auth-decoration {
+  color: #e8cfb4;
+}
+
+[data-theme='dark'] .auth-brand-content h1 span {
+  color: #e8cfb4;
+}
 .auth-brand-content {
   position: relative;
 

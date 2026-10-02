@@ -5,7 +5,7 @@ import { createOrder, payOrder } from './services/orderService';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import sweetImage from './assets/images/pexels-vi-t-anh-nguy-n-2150409023-39240989.jpg';
+import sweetImage from "./assets/images/sweet.webp";
 import { useCart } from './context/CartContext.jsx';
 import { useMemo } from 'react';
 
